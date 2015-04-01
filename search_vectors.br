@@ -1,0 +1,508 @@
+/*
+
+uint4 K[64] = { 
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+};
+
+*/
+/*
+uint4 H[8] = { 
+	0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0xfc08884d, 0xec9fcd13
+}; // Has a shortcut for H[3] through H[7]
+*/
+/*
+uint4 H[8] = {
+	0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+};
+*/
+
+kernel uint4 u(uint x){
+   return uint4(x, x, x, x);
+}
+
+kernel uint4 rotr(uint4 x, uint4 y) {
+   return (x >> y) | (x << (u((uint)32) - y));
+}
+
+kernel uint4 S0(uint4 x){
+   return rotr(x,u((uint)2)) ^ rotr(x,u((uint)13)) ^ rotr(x,u((uint)22));
+}
+
+kernel uint4 S1(uint4 x){
+   return rotr(x,u((uint)6)) ^ rotr(x,u((uint)11)) ^ rotr(x,u((uint)25));
+}
+
+kernel uint4 s0(uint4 x){
+   return rotr(x, u((uint)7)) ^ rotr(x, u((uint)18)) ^ (x >> u((uint)3));
+}
+
+kernel uint4 s1(uint4 x){
+   return rotr(x, u((uint)17)) ^ rotr(x, u((uint)19)) ^ (x >> u((uint)10));
+}
+
+kernel uint4 Ch(uint4 x, uint4 y, uint4 z){
+   return z ^ (x & (y ^ z));
+}
+
+kernel uint4 Ma(uint4 x, uint4 y, uint4 z){
+   return Ch(z ^ x, y, z);
+}
+
+/*
+	t1 = h + S1(e) + Ch(e,f,g) + K[t] + W[t]
+	t2 = S0(a) + Ma(a,b,c)
+	h = g
+	g = f
+	f = e
+	e = d + t1
+	d = c
+	c = b
+	b = a
+	a = t1 + t2
+*/
+
+/*
+	T1[t] = e[t-4] + S1(e[t-1]) + Ch(e[t-1],e[t-2],e[t-3]) + K[t] + W[t]
+	T2[t] = S0(a[t-1]) + Ma(a[t-1],a[t-2],a[t-3])
+	h[t]=e[t-3]
+	g[t]=e[t-2]
+	f[t]=e[t-1]
+	e[t]=a[t-4]+T1[t]
+	d[t]=a[t-3]
+	c[t]=a[t-2]
+	b[t]=a[t-1]
+	a[t]=T1[t]+T2[t] 
+            = T1[t] + S0(a[t-1]) + Ma(a[t-1],a[t-2],a[t-3])
+*/
+
+
+kernel void sharound(uint4 a<>, uint4 b<>, uint4 c<>, uint4 d<>, uint4 e<>, uint4 f<>, uint4 g<>, uint4 h<>, uint4 K<>, uint4 W<>, out uint4 a1<>, out uint4 e1<>){
+       uint4 t = h + S1(e) + Ch(e,f,g) + K + W;
+       e1 = d + t;
+       a1 = t + S0(a)+Ma(a,b,c);
+}
+
+kernel void shablankround(uint4 a<>, uint4 b<>, uint4 c<>, uint4 d<>, uint4 e<>, uint4 f<>, uint4 g<>, uint4 h<>, uint4 K<>, out uint4 a1<>, out uint4 e1<>){
+       uint4 t = h + S1(e) + Ch(e,f,g) + K;
+       e1 = d + t;
+       a1 = t + S0(a)+Ma(a,b,c);
+}
+
+
+kernel void sha256_search(uint ai<>, uint bi<>, uint ci<>, uint di<>, uint ei<>, uint fi<>, uint gi<>, uint hi<>,
+       	     		  uint e2i<>, uint e1i<>, uint e0i<>, uint a2i<>, uint a1i<>, uint a0i<>,
+			  uint basei<>, uint w2i<>, uint w16i<>, uint w17i<>,
+			  uint t3partiali<>, uint t2i<>,
+		   	  out uint4 hash<>){
+   uint4 a=u(ai),b=u(bi),c=u(ci),d=u(di),e=u(ei),f=u(fi),g=u(gi),h=u(hi);
+   uint4 e2=u(e2i),e1=u(e1i),e0=u(e0i),a2=u(a2i),a1=u(a1i),a0=u(a0i);
+   uint4 w2=u(w2i),w16=u(w16i),w17=u(w17i);
+   uint4 t3partial=u(t3partiali),t2=u(t2i);
+   uint4 w3, w4, w15, w18, w19;
+   uint4 w20, w21, w22, w23, w24, w25, w26, w27, w28, w29;
+   uint4 w30, w31, w32, w33, w34, w35, w36, w37, w38, w39;
+   uint4 w40, w41, w42, w43, w44, w45, w46, w47, w48, w49;
+   uint4 w50, w51, w52, w53, w54, w55, w56, w57, w58, w59;
+   uint4 w60, w61, w62, w63;
+   uint4 e3;
+   uint4 a3;
+   uint4 t3, t4;
+   uint4 w64, w65, w66, w67, w68, w69;
+   uint4 w70, w71, w72, w73, w74, w75, w76, w77, w78, w79;
+   uint4 w100, w101, w102, w103, w104, w105, w106, w107;
+   uint4 w115, w116, w117, w118, w119; // w108 = w4, w109 - w114 are 0
+   uint4 w120, w121, w122, w123, w124, w125, w126, w127, w128, w129;
+   uint4 w130, w131, w132, w133, w134, w135, w136, w137, w138, w139;
+   uint4 w140, w141, w142, w143, w144, w145, w146, w147, w148, w149;
+   uint4 w150, w151, w152, w153, w154, w155, w156, w157, w158, w159;
+   uint4 e0h;
+   
+   //w0
+   //w1
+   //w2 parameter
+   w3 = u((basei + (uint)instance().x) << (uint)2) + uint4((uint)0,(uint)1,(uint)2,(uint)3);
+   //w3 = (base << u((uint)2)) + inc;
+   t3 = w3 + t3partial;
+   w4 = u((uint)0x80000000);
+   //w5 through w14 are 0
+   w15 = u((uint)0x280);
+   //w16 parameter
+   //w17 parameter
+   w18 = s1(w16) + s0(w3) + w2;
+   w19 = u((uint)0x11002000) + s1(w17) + w3;
+   w20 = s1(w18) + w4;
+   w21 = s1(w19);
+   w22 = s1(w20) + w15;
+   w23 = s1(w21) + w16;
+   w24 = s1(w22) + w17;
+   w25 = s1(w23) + w18;
+   w26 = s1(w24) + w19;
+   w27 = s1(w25) + w20;
+   w28 = s1(w26) + w21;
+   w29 = s1(w27) + w22;
+   w30 = s1(w28) + w23 + u((uint)0xa00055);
+
+
+   e3 = a + t3;
+   a3 = t2 + t3;
+
+   t4 = u((uint)0xb956c25b) + e0 + S1(e3) + Ch(e3, e2, e1);
+   e0 = a0 + t4;
+   a0 = t4 + S0(a3) + Ma(a3, a2, a1);
+
+   shablankround(a0,a3,a2,a1,e0,e3,e2,e1, u((uint)0x59f111f1),a1,e1);
+   shablankround(a1,a0,a3,a2,e1,e0,e3,e2, u((uint)0x923f82a4),a2,e2);
+   shablankround(a2,a1,a0,a3,e2,e1,e0,e3, u((uint)0xab1c5ed5),a3,e3);
+   shablankround(a3,a2,a1,a0,e3,e2,e1,e0, u((uint)0xd807aa98),a0,e0);
+   shablankround(a0,a3,a2,a1,e0,e3,e2,e1, u((uint)0x12835b01),a1,e1);
+   shablankround(a1,a0,a3,a2,e1,e0,e3,e2, u((uint)0x243185be),a2,e2);
+   shablankround(a2,a1,a0,a3,e2,e1,e0,e3, u((uint)0x550c7dc3),a3,e3);
+   shablankround(a3,a2,a1,a0,e3,e2,e1,e0, u((uint)0x72be5d74),a0,e0);
+   shablankround(a0,a3,a2,a1,e0,e3,e2,e1, u((uint)0x80deb1fe),a1,e1);
+   shablankround(a1,a0,a3,a2,e1,e0,e3,e2, u((uint)0x9bdc06a7),a2,e2);
+   sharound(a2,a1,a0,a3,e2,e1,e0,e3, u((uint)0xc19bf174), w15,a3,e3);
+   sharound(a3,a2,a1,a0,e3,e2,e1,e0, u((uint)0xe49b69c1), w16,a0,e0);
+   sharound(a0,a3,a2,a1,e0,e3,e2,e1, u((uint)0xefbe4786), w17,a1,e1);
+   sharound(a1,a0,a3,a2,e1,e0,e3,e2, u((uint)0x0fc19dc6), w18,a2,e2);
+   sharound(a2,a1,a0,a3,e2,e1,e0,e3, u((uint)0x240ca1cc), w19,a3,e3);
+   sharound(a3,a2,a1,a0,e3,e2,e1,e0, u((uint)0x2de92c6f), w20,a0,e0);
+   sharound(a0,a3,a2,a1,e0,e3,e2,e1, u((uint)0x4a7484aa), w21,a1,e1);
+   sharound(a1,a0,a3,a2,e1,e0,e3,e2, u((uint)0x5cb0a9dc), w22,a2,e2);
+   sharound(a2,a1,a0,a3,e2,e1,e0,e3, u((uint)0x76f988da), w23,a3,e3);
+   sharound(a3,a2,a1,a0,e3,e2,e1,e0, u((uint)0x983e5152), w24,a0,e0);
+   sharound(a0,a3,a2,a1,e0,e3,e2,e1, u((uint)0xa831c66d), w25,a1,e1);
+   sharound(a1,a0,a3,a2,e1,e0,e3,e2, u((uint)0xb00327c8), w26,a2,e2);
+   sharound(a2,a1,a0,a3,e2,e1,e0,e3, u((uint)0xbf597fc7), w27,a3,e3);
+   sharound(a3,a2,a1,a0,e3,e2,e1,e0, u((uint)0xc6e00bf3), w28,a0,e0);
+   sharound(a0,a3,a2,a1,e0,e3,e2,e1, u((uint)0xd5a79147), w29,a1,e1);
+   sharound(a1,a0,a3,a2,e1,e0,e3,e2, u((uint)0x06ca6351), w30,a2,e2);
+   w31 = s1(w29) + w24 + s0(w16) + w15;
+   sharound(a2,a1,a0,a3,e2,e1,e0,e3, u((uint)0x14292967), w31,a3,e3);
+   w32 = s1(w30) + w25 + s0(w17) + w16;
+   sharound(a3,a2,a1,a0,e3,e2,e1,e0, u((uint)0x27b70a85), w32,a0,e0);
+   w33 = s1(w31) + w26 + s0(w18) + w17;
+   sharound(a0,a3,a2,a1,e0,e3,e2,e1, u((uint)0x2e1b2138), w33,a1,e1);
+   w34 = s1(w32) + w27 + s0(w19) + w18;
+   sharound(a1,a0,a3,a2,e1,e0,e3,e2, u((uint)0x4d2c6dfc), w34,a2,e2);
+   w35 = s1(w33) + w28 + s0(w20) + w19;
+   sharound(a2,a1,a0,a3,e2,e1,e0,e3, u((uint)0x53380d13), w35,a3,e3);
+   w36 = s1(w34) + w29 + s0(w21) + w20;
+   sharound(a3,a2,a1,a0,e3,e2,e1,e0, u((uint)0x650a7354), w36,a0,e0);
+   w37 = s1(w35) + w30 + s0(w22) + w21;
+   sharound(a0,a3,a2,a1,e0,e3,e2,e1, u((uint)0x766a0abb), w37,a1,e1);
+   w38 = s1(w36) + w31 + s0(w23) + w22;
+   sharound(a1,a0,a3,a2,e1,e0,e3,e2, u((uint)0x81c2c92e), w38,a2,e2);
+   w39 = s1(w37) + w32 + s0(w24) + w23;
+   sharound(a2,a1,a0,a3,e2,e1,e0,e3, u((uint)0x92722c85), w39,a3,e3);
+   w40 = s1(w38) + w33 + s0(w25) + w24;
+   sharound(a3,a2,a1,a0,e3,e2,e1,e0, u((uint)0xa2bfe8a1), w40,a0,e0);
+   w41 = s1(w39) + w34 + s0(w26) + w25;
+   sharound(a0,a3,a2,a1,e0,e3,e2,e1, u((uint)0xa81a664b), w41,a1,e1);
+   w42 = s1(w40) + w35 + s0(w27) + w26;
+   sharound(a1,a0,a3,a2,e1,e0,e3,e2, u((uint)0xc24b8b70), w42,a2,e2);
+   w43 = s1(w41) + w36 + s0(w28) + w27;
+   sharound(a2,a1,a0,a3,e2,e1,e0,e3, u((uint)0xc76c51a3), w43,a3,e3);
+   w44 = s1(w42) + w37 + s0(w29) + w28;
+   sharound(a3,a2,a1,a0,e3,e2,e1,e0, u((uint)0xd192e819), w44,a0,e0);
+   w45 = s1(w43) + w38 + s0(w30) + w29;
+   sharound(a0,a3,a2,a1,e0,e3,e2,e1, u((uint)0xd6990624), w45,a1,e1);
+   w46 = s1(w44) + w39 + s0(w31) + w30;
+   sharound(a1,a0,a3,a2,e1,e0,e3,e2, u((uint)0xf40e3585), w46,a2,e2);
+   w47 = s1(w45) + w40 + s0(w32) + w31;
+   sharound(a2,a1,a0,a3,e2,e1,e0,e3, u((uint)0x106aa070), w47,a3,e3);
+   w48 = s1(w46) + w41 + s0(w33) + w32;
+   sharound(a3,a2,a1,a0,e3,e2,e1,e0, u((uint)0x19a4c116), w48,a0,e0);
+   w49 = s1(w47) + w42 + s0(w34) + w33;
+   sharound(a0,a3,a2,a1,e0,e3,e2,e1, u((uint)0x1e376c08), w49,a1,e1);
+   w50 = s1(w48) + w43 + s0(w35) + w34;
+   sharound(a1,a0,a3,a2,e1,e0,e3,e2, u((uint)0x2748774c), w50,a2,e2);
+   w51 = s1(w49) + w44 + s0(w36) + w35;
+   sharound(a2,a1,a0,a3,e2,e1,e0,e3, u((uint)0x34b0bcb5), w51,a3,e3);
+   w52 = s1(w50) + w45 + s0(w37) + w36;
+   sharound(a3,a2,a1,a0,e3,e2,e1,e0, u((uint)0x391c0cb3), w52,a0,e0);
+   w53 = s1(w51) + w46 + s0(w38) + w37;
+   sharound(a0,a3,a2,a1,e0,e3,e2,e1, u((uint)0x4ed8aa4a), w53,a1,e1);
+   w54 = s1(w52) + w47 + s0(w39) + w38;
+   sharound(a1,a0,a3,a2,e1,e0,e3,e2, u((uint)0x5b9cca4f), w54,a2,e2);
+   w55 = s1(w53) + w48 + s0(w40) + w39;
+   sharound(a2,a1,a0,a3,e2,e1,e0,e3, u((uint)0x682e6ff3), w55,a3,e3);
+   w56 = s1(w54) + w49 + s0(w41) + w40;
+   sharound(a3,a2,a1,a0,e3,e2,e1,e0, u((uint)0x748f82ee), w56,a0,e0);
+   w57 = s1(w55) + w50 + s0(w42) + w41;
+   sharound(a0,a3,a2,a1,e0,e3,e2,e1, u((uint)0x78a5636f), w57,a1,e1);
+   w58 = s1(w56) + w51 + s0(w43) + w42;
+   sharound(a1,a0,a3,a2,e1,e0,e3,e2, u((uint)0x84c87814), w58,a2,e2);
+   w59 = s1(w57) + w52 + s0(w44) + w43;
+   sharound(a2,a1,a0,a3,e2,e1,e0,e3, u((uint)0x8cc70208), w59,a3,e3);
+   w60 = s1(w58) + w53 + s0(w45) + w44;
+   sharound(a3,a2,a1,a0,e3,e2,e1,e0, u((uint)0x90befffa), w60,a0,e0);
+   w61 = s1(w59) + w54 + s0(w46) + w45;
+   sharound(a0,a3,a2,a1,e0,e3,e2,e1, u((uint)0xa4506ceb), w61,a1,e1);
+   w62 = s1(w60) + w55 + s0(w47) + w46;
+   sharound(a1,a0,a3,a2,e1,e0,e3,e2, u((uint)0xbef9a3f7), w62,a2,e2);
+   w63 = s1(w61) + w56 + s0(w48) + w47;
+   sharound(a2,a1,a0,a3,e2,e1,e0,e3, u((uint)0xc67178f2), w63,a3,e3);
+
+   w100 = a + a3;
+   w101 = b + a2;
+   w102 = c + a1;
+   w103 = d + a0;
+   w104 = e + e3;
+   w105 = f + e2;
+   w106 = g + e1;
+   w107 = h + e0;
+   w115 = u((uint)0x100);
+
+   a0 = w100 + u((uint)0xfc08884d);
+   e0 = w100 + u((uint)0x98c7e2a2);
+   sharound(a0, u((uint)0x6a09e667), u((uint)0xbb67ae85), u((uint)0x3c6ef372), e0, u((uint)0x510e527f), u((uint)0x9b05688c), u((uint)0x1f83d9ab), u((uint)0x71374491), w101, a1, e1);
+   sharound(a1,a0, u((uint)0x6a09e667), u((uint)0xbb67ae85), e1, e0, u((uint)0x510e527f), u((uint)0x9b05688c), u((uint)0xb5c0fbcf), w102, a2, e2);
+   sharound(a2,a1,a0,u((uint)0x6a09e667),e2,e1,e0, u((uint)0x510e527f), u((uint)0xe9b5dba5), w103, a3, e3);
+   sharound(a3,a2,a1,a0,e3,e2,e1,e0, u((uint)0x3956c25b), w104, a0, e0);
+   sharound(a0,a3,a2,a1,e0,e3,e2,e1, u((uint)0x59f111f1), w105, a1,e1);
+   sharound(a1,a0,a3,a2,e1,e0,e3,e2, u((uint)0x923f82a4), w106, a2,e2);
+   sharound(a2,a1,a0,a3,e2,e1,e0,e3, u((uint)0xab1c5ed5), w107, a3,e3);
+   sharound(a3,a2,a1,a0,e3,e2,e1,e0, u((uint)0xd807aa98), w4, a0,e0);
+   shablankround(a0,a3,a2,a1,e0,e3,e2,e1, u((uint)0x12835b01),a1,e1);
+   shablankround(a1,a0,a3,a2,e1,e0,e3,e2, u((uint)0x243185be),a2,e2);
+   shablankround(a2,a1,a0,a3,e2,e1,e0,e3, u((uint)0x550c7dc3),a3,e3);
+   shablankround(a3,a2,a1,a0,e3,e2,e1,e0, u((uint)0x72be5d74),a0,e0);
+   shablankround(a0,a3,a2,a1,e0,e3,e2,e1, u((uint)0x80deb1fe),a1,e1);
+   shablankround(a1,a0,a3,a2,e1,e0,e3,e2, u((uint)0x9bdc06a7),a2,e2);
+   sharound(a2,a1,a0,a3,e2,e1,e0,e3, u((uint)0xc19bf174), w115,a3,e3);
+// 0-8 populated (8 pseudo)
+// 9-14 blank
+// 15 populated
+
+   w116 = s0(w101) + w100;
+   w117 = u((uint)0xa00000) + s0(w102) + w101;
+   w118 = w102 + s0(w103) + s1(w116);
+   w119 = w103 + s0(w104) + s1(w117);
+   w120 = w104 + s0(w105) + s1(w118);
+   w121 = w105 + s0(w106) + s1(w119);
+   w122 = w106 + w115 + s0(w107) + s1(w120);
+
+   sharound(a3,a2,a1,a0,e3,e2,e1,e0, u((uint)0xe49b69c1), w116,a0,e0);
+   sharound(a0,a3,a2,a1,e0,e3,e2,e1, u((uint)0xefbe4786), w117,a1,e1);
+   sharound(a1,a0,a3,a2,e1,e0,e3,e2, u((uint)0x0fc19dc6), w118,a2,e2);
+   sharound(a2,a1,a0,a3,e2,e1,e0,e3, u((uint)0x240ca1cc), w119,a3,e3);
+   sharound(a3,a2,a1,a0,e3,e2,e1,e0, u((uint)0x2de92c6f), w120,a0,e0);
+   sharound(a0,a3,a2,a1,e0,e3,e2,e1, u((uint)0x4a7484aa), w121,a1,e1);
+   sharound(a1,a0,a3,a2,e1,e0,e3,e2, u((uint)0x5cb0a9dc), w122,a2,e2);
+
+   w123 = w107 + w116 + u((uint)0x11002000) + s1(w121);
+   sharound(a2,a1,a0,a3,e2,e1,e0,e3, u((uint)0x76f988da), w123,a3,e3);
+   w124 = w4 + w117 + s1(w122);
+   sharound(a3,a2,a1,a0,e3,e2,e1,e0, u((uint)0x983e5152), w124,a0,e0);
+   w125 = w118 + s1(w123);
+   sharound(a0,a3,a2,a1,e0,e3,e2,e1, u((uint)0xa831c66d), w125,a1,e1);
+   w126 = w119 + s1(w124);
+   sharound(a1,a0,a3,a2,e1,e0,e3,e2, u((uint)0xb00327c8), w126,a2,e2);
+   w127 = w120 + s1(w125);
+   sharound(a2,a1,a0,a3,e2,e1,e0,e3, u((uint)0xbf597fc7), w127,a3,e3);
+   w128 = w121 + s1(w126);
+   sharound(a3,a2,a1,a0,e3,e2,e1,e0, u((uint)0xc6e00bf3), w128,a0,e0);
+   w129 = w122 + s1(w127);
+   sharound(a0,a3,a2,a1,e0,e3,e2,e1, u((uint)0xd5a79147), w129,a1,e1);
+   w130 = w123 + s1(w128) + u((uint)0x400022);
+   sharound(a1,a0,a3,a2,e1,e0,e3,e2, u((uint)0x06ca6351), w130,a2,e2);
+   w131 = s1(w129) + w124 + s0(w116) + w115;
+   sharound(a2,a1,a0,a3,e2,e1,e0,e3, u((uint)0x14292967), w131,a3,e3);
+   w132 = s1(w130) + w125 + s0(w117) + w116;
+   sharound(a3,a2,a1,a0,e3,e2,e1,e0, u((uint)0x27b70a85), w132,a0,e0);
+   w133 = s1(w131) + w126 + s0(w118) + w117;
+   sharound(a0,a3,a2,a1,e0,e3,e2,e1, u((uint)0x2e1b2138), w133,a1,e1);
+   w134 = s1(w132) + w127 + s0(w119) + w118;
+   sharound(a1,a0,a3,a2,e1,e0,e3,e2, u((uint)0x4d2c6dfc), w134,a2,e2);
+   w135 = s1(w133) + w128 + s0(w120) + w119;
+   sharound(a2,a1,a0,a3,e2,e1,e0,e3, u((uint)0x53380d13), w135,a3,e3);
+   w136 = s1(w134) + w129 + s0(w121) + w120;
+   sharound(a3,a2,a1,a0,e3,e2,e1,e0, u((uint)0x650a7354), w136,a0,e0);
+   w137 = s1(w135) + w130 + s0(w122) + w121;
+   sharound(a0,a3,a2,a1,e0,e3,e2,e1, u((uint)0x766a0abb), w137,a1,e1);
+   w138 = s1(w136) + w131 + s0(w123) + w122;
+   sharound(a1,a0,a3,a2,e1,e0,e3,e2, u((uint)0x81c2c92e), w138,a2,e2);
+   w139 = s1(w137) + w132 + s0(w124) + w123;
+   sharound(a2,a1,a0,a3,e2,e1,e0,e3, u((uint)0x92722c85), w139,a3,e3);
+   w140 = s1(w138) + w133 + s0(w125) + w124;
+   sharound(a3,a2,a1,a0,e3,e2,e1,e0, u((uint)0xa2bfe8a1), w140,a0,e0);
+   w141 = s1(w139) + w134 + s0(w126) + w125;
+   sharound(a0,a3,a2,a1,e0,e3,e2,e1, u((uint)0xa81a664b), w141,a1,e1);
+   w142 = s1(w140) + w135 + s0(w127) + w126;
+   sharound(a1,a0,a3,a2,e1,e0,e3,e2, u((uint)0xc24b8b70), w142,a2,e2);
+   w143 = s1(w141) + w136 + s0(w128) + w127;
+   sharound(a2,a1,a0,a3,e2,e1,e0,e3, u((uint)0xc76c51a3), w143,a3,e3);
+   w144 = s1(w142) + w137 + s0(w129) + w128;
+   sharound(a3,a2,a1,a0,e3,e2,e1,e0, u((uint)0xd192e819), w144,a0,e0);
+   w145 = s1(w143) + w138 + s0(w130) + w129;
+   sharound(a0,a3,a2,a1,e0,e3,e2,e1, u((uint)0xd6990624), w145,a1,e1);
+   w146 = s1(w144) + w139 + s0(w131) + w130;
+   sharound(a1,a0,a3,a2,e1,e0,e3,e2, u((uint)0xf40e3585), w146,a2,e2);
+   w147 = s1(w145) + w140 + s0(w132) + w131;
+   sharound(a2,a1,a0,a3,e2,e1,e0,e3, u((uint)0x106aa070), w147,a3,e3);
+   w148 = s1(w146) + w141 + s0(w133) + w132;
+   sharound(a3,a2,a1,a0,e3,e2,e1,e0, u((uint)0x19a4c116), w148,a0,e0);
+   w149 = s1(w147) + w142 + s0(w134) + w133;
+   sharound(a0,a3,a2,a1,e0,e3,e2,e1, u((uint)0x1e376c08), w149,a1,e1);
+   w150 = s1(w148) + w143 + s0(w135) + w134;
+   sharound(a1,a0,a3,a2,e1,e0,e3,e2, u((uint)0x2748774c), w150,a2,e2);
+   w151 = s1(w149) + w144 + s0(w136) + w135;
+   sharound(a2,a1,a0,a3,e2,e1,e0,e3, u((uint)0x34b0bcb5), w151,a3,e3);
+   w152 = s1(w150) + w145 + s0(w137) + w136;
+   sharound(a3,a2,a1,a0,e3,e2,e1,e0, u((uint)0x391c0cb3), w152,a0,e0);
+   w153 = s1(w151) + w146 + s0(w138) + w137;
+   sharound(a0,a3,a2,a1,e0,e3,e2,e1, u((uint)0x4ed8aa4a), w153,a1,e1);
+   w154 = s1(w152) + w147 + s0(w139) + w138;
+   sharound(a1,a0,a3,a2,e1,e0,e3,e2, u((uint)0x5b9cca4f), w154,a2,e2);
+   w155 = s1(w153) + w148 + s0(w140) + w139;
+   sharound(a2,a1,a0,a3,e2,e1,e0,e3, u((uint)0x682e6ff3), w155,a3,e3);
+   w156 = s1(w154) + w149 + s0(w141) + w140;
+   sharound(a3,a2,a1,a0,e3,e2,e1,e0, u((uint)0x748f82ee), w156,a0,e0);
+   w157 = s1(w155) + w150 + s0(w142) + w141;
+   sharound(a0,a3,a2,a1,e0,e3,e2,e1, u((uint)0x78a5636f), w157,a1,e1);
+   w158 = s1(w156) + w151 + s0(w143) + w142;
+   sharound(a1,a0,a3,a2,e1,e0,e3,e2, u((uint)0x84c87814), w158,a2,e2);
+   w159 = s1(w157) + w152 + s0(w144) + w143;
+   sharound(a2,a1,a0,a3,e2,e1,e0,e3, u((uint)0x8cc70208), w159,a3,e3);
+   // Truncated round 60.
+   // e0 without W and H.
+   e0h = e0 + a0 + S1(e3) + Ch(e3, e2, e1) + s1(w158) + w153 + s0(w145) + w144;
+
+   if(e0h.x == (uint)(-0xec9fcd13))
+      hash.x == w3.x;
+   else
+      hash.x = (uint)0;
+   if(e0h.y == (uint)(-0xec9fcd13))
+      hash.y = w3.y;
+   else
+      hash.y = (uint)0;
+   if(e0h.z == (uint)(-0xec9fcd13))
+      hash.z = w3.z;
+   else
+      hash.z = (uint)0;
+   if(e0h.w == (uint)(-0xec9fcd13))
+      hash.w = w3.w;
+   else
+      hash.w = (uint)0;
+
+     //hash = e0h;
+//hash = e0h+u((uint)0xec9fcd13);
+/*
+   hash0 = a3;
+   hash1 = a2;
+   hash2 = a1;
+   hash3 = a0;
+   hash4 = e3;
+   hash5 = e2;
+   hash6 = e1;
+   hash7 = e0;
+*/
+/*
+       hash0 = a+a63;
+       hash1 = b+a62;
+       hash2 = c+a61;
+       hash3 = d+a60;
+       hash4 = e+e63;
+       hash5 = f+e62;
+       hash6 = g+e61;
+       hash7 = h+e60;
+*/
+/*
+   hash0 = a51;
+   hash1 = a52;
+   hash2 = a53;
+   hash3 = a54;
+   hash4 = a55;
+   hash5 = a56;
+   hash6 = a57;
+   hash7 = a58;
+*/
+}
+
+reduce kernel void found_solution(uint4 nonce<>, reduce uint4 nonces<>){
+   nonces += nonce;
+}
+
+kernel void add(uint4 base<>, uint4 incs<>, out uint4 bases<>){
+   bases = base + incs;
+}
+
+
+
+/*
+int main(int argc, char** argv){
+   uint src0<1>;
+   uint src1<1>;
+   uint src2<1>;
+   uint src3<1>;
+   uint src4<1>;
+   uint src5<1>;
+   uint src6<1>;
+   uint src7<1>;
+   uint src8<1>;
+   uint src9<1>;
+   uint src10<1>;
+   uint src11<1>;
+   uint src12<1>;
+   uint src13<1>;
+   uint4 src14<1>;
+   uint src15<1>;
+   uint e2<1>;
+   uint e1<1>;
+   uint e0<1>;
+   uint a2<1>;
+   uint4 dst<1>;
+   uint WS[23]={
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      1, 2, 3, 5, 6, 7, 12,13,14,15,
+      0, 1, 2, 3, 4
+   };
+   uint di[4];
+   int i;
+   streamRead(src0,WS);
+   streamRead(src1,WS+1);
+   streamRead(src2,WS+2);
+   streamRead(src3,WS+3);
+   streamRead(src4,WS+4);
+   streamRead(src5,WS+5);
+   streamRead(src6,WS+6);
+   streamRead(src7,WS+7);
+   streamRead(src8,WS+8);
+   streamRead(src9,WS+9);
+   streamRead(src10,WS+10);
+   streamRead(src11,WS+11);
+   streamRead(src12,WS+12);
+   streamRead(src13,WS+13);
+   streamRead(src14,WS+14);
+   streamRead(src15,WS+18);
+   streamRead(e2,WS+19);
+   streamRead(e1,WS+20);
+   streamRead(e0,WS+21);
+   streamRead(a2,WS+22);
+
+   sha256_search(src0, src1, src2, src3, src4, src5, src6, src7,
+                 src8, src9, src10,
+		 src11, src12, src13,
+		 src14, src15,
+                 e2, e1, e0, a2, dst);
+
+   streamWrite(dst,di);
+   for(i = 0; i < 4; ++i)
+   printf("%u\n",di[i]);
+   //printf("%u\n",di[0]);
+}
+*/
